@@ -121,7 +121,7 @@ app.post('/cargarVenta', (req, res) => {
 
 
 app.get('/traerStock/', (req, res) => {
-  const sql = `SELECT S.IdStock, M.Nombre, S.CantPorMP FROM materiaprima AS M, stock AS S WHERE S.IdMateriaPrima=M.IdMateriaPrima`;
+  const sql = `SELECT S.IdStock, M.Nombre, S.CantPorMP , S.StockMinimo FROM materiaprima AS M, stock AS S WHERE S.IdMateriaPrima=M.IdMateriaPrima`;
   db.query(sql, (err, results) => {
     if (err) {
       return res.status(400).send(err);
@@ -209,7 +209,7 @@ app.post('/cargarProveedor', (req, res) => {
 
 
 app.get('/traerProveedores/', (req, res) => {
-  const sql = `SELECT IdProveedor, NombreProveedor,TipoProveedor, TelefonoProveedor, MailProveedor FROM proveedores`;
+  const sql = `SELECT IdProveedor, NombreProveedor,TipoProveedor, TelefonoProveedor, MailProveedor,Identificador FROM proveedores`;
   db.query(sql, (err, results) => {
     if (err) {
       return res.status(400).send(err);
@@ -358,11 +358,154 @@ app.get('/MaterialesProductoMod/:id', (req, res) => {
     }
     console.log(results)
     res.status(200).send(results);
+    
 
   });
 
 
 });
+
+
+
+//para gestion de compras de materia prima
+
+app.get('/buscarMateriaPrima',(req,resp)=>{
+  const sql = `SELECT * FROM materiaprima `
+  db.query(sql, (err, results) => {
+    if (err) throw err;
+    resp.status(200).send(results)
+
+  })
+
+})
+
+app.post('/cargarCompras', (req, res) => {
+  const compra = req.body;
+  const fecha=compra.fecha
+  const fe=new Date(fecha)
+  const sql = `INSERT INTO compras (IdProveedor , Fecha ,Estado) VALUES(?,?,?) `
+  db.query(sql, [compra.id,compra.fecha,compra.estado], (err, results) => {
+    if (err) throw err;
+    
+
+   compra.MP.forEach((mp) => {
+      const sql2 = 'INSERT INTO detallescompras (IdCompra, IdMP, CantMP,PrecioMP) VALUES (?,?,?,?)';
+      db.query(sql2, [results.insertId,mp.id,mp.cantidad,mp.precio], (err2) => {
+        if (err2) throw err2;
+        res.status(200).send(results[0])
+      })
+    })
+  })
+})
+
+app.get('/traerCompras', (req, res) => {
+  const sql = `SELECT  C.IdCompra,C.Fecha,C.Estado, P.NombreProveedor FROM compras AS C, proveedores AS P WHERE C.IdProveedor=P.IdProveedor`;
+  db.query(sql, (err, results) => {
+    if (err) {
+      return res.status(400).send(err);
+    }
+    res.status(200).send(results);
+   
+  });
+});
+
+app.get('/traerComprasConDetalle/:id', (req, res) => {
+  const {id}=req.params
+  const sql = `SELECT  IdCompra, IdMP, CantMP  FROM detallescompras  WHERE IdCompra=${id}`;
+  db.query(sql, (err, results) => {
+   
+   
+    results.forEach((x) => {
+      const sql = `SELECT  IdMateriaPrima, CantPorMP FROM stock WHERE IdMateriaPrima=${x.IdMP}`;
+      db.query(sql, (err, results2) => {
+        
+        
+    
+        const cantFinal=parseInt(results2[0].CantPorMP)+ parseInt(x.CantMP)
+        const sql2=`UPDATE stock SET CantPorMP=${cantFinal} WHERE IdMateriaPrima=${results2[0].IdMateriaPrima} `
+        db.query(sql2,(err,result3)=>{
+        })
+       
+      });
+    })
+    if (err) {
+      return res.status(400).send(err);
+    }
+    res.status(200).send(results);
+    
+  });
+});
+
+
+app.get('/traerDetalleCompra/:id', (req, res) => {
+  const {id}=req.params
+  const sql = `SELECT  D.CantMP, D.PrecioMP,M.Nombre FROM detallescompras AS D , materiaprima AS M WHERE D.IdCompra=${id} AND M.IdMateriaPrima=D.IdMP`;
+  db.query(sql, (err, results) => {
+    if (err) {
+      return res.status(400).send(err);
+    }
+    res.status(200).send(results);
+  
+  });
+});
+
+
+//-----------------------cambiar estado-----------------
+app.put('/confirmarCompra/:id',(req,res)=>{
+  const {id}=req.params;
+
+  const sql=`UPDATE compras SET Estado=? WHERE IdCompra=${id}`
+  db.query(sql,["completado"], (error, results) => {
+    if (error) {
+      return res.status(400).send(error)
+    }
+    res.status(200).send(results)
+  })
+
+})
+
+app.put('/cancelarCompra/:id',(req,res)=>{
+  const {id}=req.params;
+   
+  const sql=`UPDATE compras SET Estado=? WHERE IdCompra=${id}`
+  db.query(sql,["cancelado"], (error, results) => {
+    if (error) {
+      return res.status(400).send(error)
+    }
+    res.status(200).send(results)
+  })
+
+})
+
+
+app.get("/buscarDate",(req,res)=>{
+  const sql='SELECT s.CantPorMP,mp.Nombre FROM stock AS s, materiaprima AS mp WHERE mp.IdMateriaPrima=s.IdMateriaPrima'
+  db.query(sql, (err, results) => {
+    if (err) {
+      return res.status(400).send(err);
+    }
+    res.status(200).send(results);
+
+  });
+})
+
+app.get("/GraficoCantidad",(req,res)=>{
+  const {mes}=req.query
+  
+  const sql='SELECT m.Nombre AS material, SUM(dc.CantMP) AS cantidad FROM detallescompras dc JOIN compras c ON dc.IdCompra = c.IdCompra JOIN materiaprima m ON dc.IdMP = m.IdMateriaPrima WHERE MONTH(c.Fecha) =? AND YEAR(c.Fecha) = 2024 GROUP BY m.Nombre'
+  db.query(sql,[mes],(err, results) => {
+    if (err) {
+      return res.status(400).send(err);
+    }
+    res.status(200).send(results);
+  
+  });
+})
+
+
+
+
+
 
 
 app.listen(port, () => {
