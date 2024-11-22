@@ -8,7 +8,7 @@ const mysql = require('mysql2');
 const db = mysql.createConnection({
   host: "localhost",
   user: "root",
-  password: "",
+  password: "chipote10",
   database: "factory"
 });
 
@@ -90,7 +90,7 @@ app.get('/traerProductos/', (req, res) => {
 
 app.post('/cargarVenta', (req, res) => {
   const ventaReq = req.body;
-  const actualizarStock = () => {
+  /*const actualizarStock = () => {
     const query = `SELECT * FROM mpporproducto WHERE IdProducto=${ventaReq.idProducto}`;
 
 
@@ -108,15 +108,21 @@ app.post('/cargarVenta', (req, res) => {
     });
 
   }
-  actualizarStock();
+  actualizarStock();*/
 
-  const query2 = `INSERT INTO ventas SET ?`
-  db.query(query2, ventaReq, (err) => {
-    if (err) {
-      return res.status(500).send(err);
-    }
-    res.send('Venta guardada exitosamente');
-  });
+  
+  const sql = `INSERT INTO ventas ( IdCliente, fechaVenta , estado) VALUES(?,?,?) `
+  db.query(sql, [ventaReq.idCliente, ventaReq.fechaVenta,ventaReq.estado], (err, results) => {
+    if (err) throw err;
+
+    ventaReq.productos.forEach((producto) => {
+      const sql2 = 'INSERT INTO detallesdeventa (idventa, idproducto, cantidad) VALUES (?,?,?)';
+      db.query(sql2, [results.insertId, producto.id, producto.cantidad], (err2) => {
+        if (err2) throw err2;
+        res.status(200).send(results[0])
+      })
+    })
+  })
 });
 
 
@@ -295,25 +301,25 @@ app.post('/cargarProducto', (req, res) => {
 })
 
 app.put('/cargarProducto/:id', (req, res) => {
-  const { id }=req.params;
+  const { id } = req.params;
   const producto = req.body;
   console.log(req.body)
   const sql = `UPDATE producto SET Nombre=? , Descripcion=? , Precio=? , Imagen=? WHERE IdProducto= ${id} `
   db.query(sql, [producto.Nombre, producto.Descripcion, producto.Precio, producto.Imagen], (err, results) => {
     if (err) throw err;
-    
+
 
     producto.materiales.forEach((material) => {
-      let idMaterial=material.id;
+      let idMaterial = material.id;
       const sql2 = `UPDATE mpporproducto SET CantMp=?  WHERE  IdProducto=${id} AND IdMateriaPrima=${idMaterial}`;
       db.query(sql2, [material.cantidad], (err2) => {
         if (err2) throw err2;
-       
+
         res.status(200).send(results[0])
       })
-      
-        
-      
+
+
+
     })
   })
 })
@@ -323,12 +329,12 @@ app.delete('/eliminarProducto/:id', (req, res) => {
   const query = 'DELETE FROM producto WHERE IdProducto = ?';
   db.query(query, [id], (err, result) => {
     if (err) throw err;
-    const query2='DELETE FROM mpporproducto WHERE IdProducto = ?';
-    db.query(query2,[id],(err2,)=>{
-     if(err2) throw err2
+    const query2 = 'DELETE FROM mpporproducto WHERE IdProducto = ?';
+    db.query(query2, [id], (err2,) => {
+      if (err2) throw err2
       res.status(204).send(result);
     })
-      
+
   });
 
 });
@@ -341,7 +347,7 @@ app.get('/ProductoMod/:id', (req, res) => {
     if (err) {
       return res.status(400).send(err);
     }
-    
+
     res.status(200).send(results[0]);
 
   });
@@ -358,7 +364,7 @@ app.get('/MaterialesProductoMod/:id', (req, res) => {
     }
     console.log(results)
     res.status(200).send(results);
-    
+
 
   });
 
@@ -369,7 +375,7 @@ app.get('/MaterialesProductoMod/:id', (req, res) => {
 
 //para gestion de compras de materia prima
 
-app.get('/buscarMateriaPrima',(req,resp)=>{
+app.get('/buscarMateriaPrima', (req, resp) => {
   const sql = `SELECT * FROM materiaprima `
   db.query(sql, (err, results) => {
     if (err) throw err;
@@ -381,16 +387,16 @@ app.get('/buscarMateriaPrima',(req,resp)=>{
 
 app.post('/cargarCompras', (req, res) => {
   const compra = req.body;
-  const fecha=compra.fecha
-  const fe=new Date(fecha)
+  const fecha = compra.fecha
+  const fe = new Date(fecha)
   const sql = `INSERT INTO compras (IdProveedor , Fecha ,Estado) VALUES(?,?,?) `
-  db.query(sql, [compra.id,compra.fecha,compra.estado], (err, results) => {
+  db.query(sql, [compra.id, compra.fecha, compra.estado], (err, results) => {
     if (err) throw err;
-    
 
-   compra.MP.forEach((mp) => {
+
+    compra.MP.forEach((mp) => {
       const sql2 = 'INSERT INTO detallescompras (IdCompra, IdMP, CantMP,PrecioMP) VALUES (?,?,?,?)';
-      db.query(sql2, [results.insertId,mp.id,mp.cantidad,mp.precio], (err2) => {
+      db.query(sql2, [results.insertId, mp.id, mp.cantidad, mp.precio], (err2) => {
         if (err2) throw err2;
         res.status(200).send(results[0])
       })
@@ -405,57 +411,57 @@ app.get('/traerCompras', (req, res) => {
       return res.status(400).send(err);
     }
     res.status(200).send(results);
-   
+
   });
 });
 
 app.get('/traerComprasConDetalle/:id', (req, res) => {
-  const {id}=req.params
+  const { id } = req.params
   const sql = `SELECT  IdCompra, IdMP, CantMP  FROM detallescompras  WHERE IdCompra=${id}`;
   db.query(sql, (err, results) => {
-   
-   
+
+
     results.forEach((x) => {
       const sql = `SELECT  IdMateriaPrima, CantPorMP FROM stock WHERE IdMateriaPrima=${x.IdMP}`;
       db.query(sql, (err, results2) => {
-        
-        
-    
-        const cantFinal=parseInt(results2[0].CantPorMP)+ parseInt(x.CantMP)
-        const sql2=`UPDATE stock SET CantPorMP=${cantFinal} WHERE IdMateriaPrima=${results2[0].IdMateriaPrima} `
-        db.query(sql2,(err,result3)=>{
+
+
+
+        const cantFinal = parseInt(results2[0].CantPorMP) + parseInt(x.CantMP)
+        const sql2 = `UPDATE stock SET CantPorMP=${cantFinal} WHERE IdMateriaPrima=${results2[0].IdMateriaPrima} `
+        db.query(sql2, (err, result3) => {
         })
-       
+
       });
     })
     if (err) {
       return res.status(400).send(err);
     }
     res.status(200).send(results);
-    
+
   });
 });
 
 
 app.get('/traerDetalleCompra/:id', (req, res) => {
-  const {id}=req.params
+  const { id } = req.params
   const sql = `SELECT  D.CantMP, D.PrecioMP,M.Nombre FROM detallescompras AS D , materiaprima AS M WHERE D.IdCompra=${id} AND M.IdMateriaPrima=D.IdMP`;
   db.query(sql, (err, results) => {
     if (err) {
       return res.status(400).send(err);
     }
     res.status(200).send(results);
-  
+
   });
 });
 
 
 //-----------------------cambiar estado-----------------
-app.put('/confirmarCompra/:id',(req,res)=>{
-  const {id}=req.params;
+app.put('/confirmarCompra/:id', (req, res) => {
+  const { id } = req.params;
 
-  const sql=`UPDATE compras SET Estado=? WHERE IdCompra=${id}`
-  db.query(sql,["completado"], (error, results) => {
+  const sql = `UPDATE compras SET Estado=? WHERE IdCompra=${id}`
+  db.query(sql, ["completado"], (error, results) => {
     if (error) {
       return res.status(400).send(error)
     }
@@ -464,11 +470,11 @@ app.put('/confirmarCompra/:id',(req,res)=>{
 
 })
 
-app.put('/cancelarCompra/:id',(req,res)=>{
-  const {id}=req.params;
-   
-  const sql=`UPDATE compras SET Estado=? WHERE IdCompra=${id}`
-  db.query(sql,["cancelado"], (error, results) => {
+app.put('/cancelarCompra/:id', (req, res) => {
+  const { id } = req.params;
+
+  const sql = `UPDATE compras SET Estado=? WHERE IdCompra=${id}`
+  db.query(sql, ["cancelado"], (error, results) => {
     if (error) {
       return res.status(400).send(error)
     }
@@ -478,8 +484,8 @@ app.put('/cancelarCompra/:id',(req,res)=>{
 })
 
 
-app.get("/buscarDate",(req,res)=>{
-  const sql='SELECT s.CantPorMP,mp.Nombre FROM stock AS s, materiaprima AS mp WHERE mp.IdMateriaPrima=s.IdMateriaPrima'
+app.get("/buscarDate", (req, res) => {
+  const sql = 'SELECT s.CantPorMP,mp.Nombre FROM stock AS s, materiaprima AS mp WHERE mp.IdMateriaPrima=s.IdMateriaPrima'
   db.query(sql, (err, results) => {
     if (err) {
       return res.status(400).send(err);
@@ -489,22 +495,61 @@ app.get("/buscarDate",(req,res)=>{
   });
 })
 
-app.get("/GraficoCantidad",(req,res)=>{
-  const {mes}=req.query
-  
-  const sql='SELECT m.Nombre AS material, SUM(dc.CantMP) AS cantidad FROM detallescompras dc JOIN compras c ON dc.IdCompra = c.IdCompra JOIN materiaprima m ON dc.IdMP = m.IdMateriaPrima WHERE MONTH(c.Fecha) =? AND YEAR(c.Fecha) = 2024 GROUP BY m.Nombre'
-  db.query(sql,[mes],(err, results) => {
+app.get("/GraficoCantidad", (req, res) => {
+  const { mes } = req.query
+
+  const sql = 'SELECT m.Nombre AS material, SUM(dc.CantMP) AS cantidad FROM detallescompras dc JOIN compras c ON dc.IdCompra = c.IdCompra JOIN materiaprima m ON dc.IdMP = m.IdMateriaPrima WHERE MONTH(c.Fecha) =? AND YEAR(c.Fecha) = 2024 GROUP BY m.Nombre'
+  db.query(sql, [mes], (err, results) => {
     if (err) {
       return res.status(400).send(err);
     }
     res.status(200).send(results);
-  
+
+  });
+})
+
+app.get("/graficoAumentoXMP/:idMaterial", (req, res) => {
+
+  const {idMaterial} = req.params;
+  const sql = "SELECT  dc.IdMP AS material, EXTRACT(YEAR FROM c.Fecha) AS año, EXTRACT(MONTH FROM c.Fecha) AS mes, AVG(dc.PrecioMP) AS precio_promedio_mensual FROM  compras  c  JOIN detallescompras dc ON c.IdCompra=dc.IdCompra WHERE  dc.IdMP = ? AND EXTRACT(YEAR FROM c.Fecha)=YEAR(NOW()) GROUP BY  material,  EXTRACT(YEAR FROM c.Fecha),  EXTRACT(MONTH FROM c.Fecha) ORDER BY   año,   mes;"
+  db.query(sql, [idMaterial], (err, results) => {
+    
+    if (err) {
+      return res.status(400).send(err);
+    }
+    res.status(200).send(results);
+
+  });
+})
+
+app.get("/graficoTortaMP/:idMes", (req, res) => {
+
+  const {idMes} = req.params;
+  const sql = "SELECT dc.IdMP AS material,EXTRACT(YEAR FROM c.Fecha) AS año, EXTRACT(MONTH FROM c.Fecha) AS mes, AVG(dc.PrecioMP) AS precio_promedio_mensual FROM  compras c JOIN detallescompras dc ON c.IdCompra = dc.IdCompra WHERE EXTRACT(MONTH FROM c.Fecha) = ?  AND EXTRACT(YEAR FROM c.Fecha) IN (YEAR(CURDATE()), YEAR(CURDATE()) - 1) GROUP BY material, año,mes ORDER BY material, año;"
+  db.query(sql, [idMes], (err, results) => {
+    
+    if (err) {
+      return res.status(400).send(err);
+    }
+    res.status(200).send(results);
+
   });
 })
 
 
+app.get("/graficoTortaVentas/:idMes", (req, res) => {
 
+  const {idMes} = req.params;
+  const sql = "SELECT p.Nombre AS nombre_producto, SUM(d.cantidad) AS cantidad_vendida,  (SELECT SUM(dv.cantidad) FROM detallesdeventa dv JOIN ventas ve ON dv.idventa = ve.IdVentas  WHERE EXTRACT(YEAR FROM ve.fechaVenta) = YEAR(NOW()) AND EXTRACT(MONTH FROM ve.fechaVenta) = ?) AS cantidad_total_mes FROM   detallesdeventa d JOIN   ventas v ON d.idventa = v.IdVentas JOIN   producto p ON d.idproducto = p.IdProducto WHERE    EXTRACT(YEAR FROM v.fechaVenta) = YEAR(NOW())   AND EXTRACT(MONTH FROM v.fechaVenta) = ? GROUP BY   p.Nombre ORDER BY  nombre_producto;"
+  db.query(sql, [idMes,idMes], (err, results) => {
+    
+    if (err) {
+      return res.status(400).send(err);
+    }
+    res.status(200).send(results);
 
+  });
+})
 
 
 
