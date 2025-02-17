@@ -68,7 +68,7 @@ app.get("/barrioxlocalidad/:id", (req, res) => {
 });
 
 app.get("/traerProductos/", (req, res) => {
-  const sql = `SELECT IdProducto, Nombre, Descripcion, Precio, Imagen FROM producto`;
+  const sql = `SELECT P.IdProducto, P.Nombre, P.Descripcion, P.Precio, I.nombreSillon FROM producto AS P INNER JOIN imagenessillones AS I ON P.Imagen=I.idimagenesSillones `;
   db.query(sql, (err, results) => {
     if (err) {
       return res.status(400).send(err);
@@ -86,47 +86,71 @@ app.get("/traerProductos/", (req, res) => {
  *
  */
 //--------------------------------------Ventas---------------------------------------
+// app.post("/cargarVenta", (req, res) => {
+//   const ventaReq = req.body;
+//   const sql = `INSERT INTO ventas ( IdCliente, fechaVenta , estado) VALUES(?,?,?) `;
+//   db.query(
+//     sql,
+//     [ventaReq.idCliente, ventaReq.fechaVenta, ventaReq.estado],
+//     (err, results) => {
+//       if (err) throw err;
+
+//       ventaReq.productos.forEach((producto) => {
+//         const sql2 =
+//           "INSERT INTO detallesdeventa (idventa, idproducto, cantidad) VALUES (?,?,?)";
+//         db.query(
+//           sql2,
+//           [results.insertId, producto.id, producto.cantidad],
+//           (err2) => {
+//             if (err2) throw err2;
+//             res.status(200).send(results[0]);
+//           }
+//         );
+//       });
+//     }
+//   );
+// });
 app.post("/cargarVenta", (req, res) => {
   const ventaReq = req.body;
-  /*const actualizarStock = () => {
-    const query = `SELECT * FROM mpporproducto WHERE IdProducto=${ventaReq.idProducto}`;
+  const sql = `INSERT INTO ventas (IdCliente, fechaVenta, estado) VALUES (?, ?, ?)`;
 
-
-    db.query(query, (err, result) => {
-      if (err) return 'Error en el select de mpPorProd'
-
-      result.forEach((materiaPrimaPorProducto) => {
-        db.query(`SELECT CantPorMP FROM stock WHERE IdMateriaPrima=${materiaPrimaPorProducto.IdMateriaPrima}`, (_, result2) => {
-          const stockDifference = parseInt(result2[0].CantPorMP) - (parseInt(materiaPrimaPorProducto.CantMp) * ventaReq.cantidad);
-          const updateQuery = `UPDATE stock SET CantPorMP=${stockDifference} WHERE IdMateriaPrima=${materiaPrimaPorProducto.IdMateriaPrima}`;
-
-          db.query(updateQuery)
-        })
-      })
-    });
-
-  }
-  actualizarStock();*/
-
-  const sql = `INSERT INTO ventas ( IdCliente, fechaVenta , estado) VALUES(?,?,?) `;
   db.query(
     sql,
     [ventaReq.idCliente, ventaReq.fechaVenta, ventaReq.estado],
     (err, results) => {
-      if (err) throw err;
+      if (err) {
+        console.error("Error al insertar en ventas:", err);
+        return res.status(500).send("Error en la base de datos");
+      }
 
-      ventaReq.productos.forEach((producto) => {
-        const sql2 =
-          "INSERT INTO detallesdeventa (idventa, idproducto, cantidad) VALUES (?,?,?)";
-        db.query(
-          sql2,
-          [results.insertId, producto.id, producto.cantidad],
-          (err2) => {
-            if (err2) throw err2;
-            res.status(200).send(results[0]);
-          }
-        );
+      const idVenta = results.insertId; // Obtener el ID de la venta recién insertada
+
+      // Crear promesas para insertar los productos
+      const insertDetalles = ventaReq.productos.map((producto) => {
+        return new Promise((resolve, reject) => {
+          const sql2 =
+            "INSERT INTO detallesdeventa (idventa, idproducto, cantidad) VALUES (?, ?, ?)";
+          db.query(sql2, [idVenta, producto.id, producto.cantidad], (err2) => {
+            if (err2) {
+              console.error("Error al insertar en detallesdeventa:", err2);
+              reject(err2);
+            } else {
+              resolve();
+            }
+          });
+        });
       });
+
+      // Esperar a que todas las inserciones terminen antes de responder
+      Promise.all(insertDetalles)
+        .then(() => {
+          res
+            .status(200)
+            .json({ message: "Venta registrada con éxito", idVenta });
+        })
+        .catch((error) => {
+          res.status(500).send("Error al insertar detalles de venta");
+        });
     }
   );
 });
@@ -151,6 +175,105 @@ app.get("/traerVentas", (req, res) => {
     }
     res.status(200).send(results);
   });
+});
+
+app.get("/traerDetalleVenta/:id", (req, res) => {
+  const { id } = req.params;
+  const sql = `SELECT 
+  P.Nombre, 
+  P.Precio, 
+  D.cantidad
+FROM 
+  ventas AS V
+INNER JOIN 
+  detallesdeventa AS D
+ON  
+  V.IdVentas=D.idventa
+INNER JOIN 
+  producto AS P
+ON  
+  D.idproducto= P.IdProducto
+WHERE 
+  V.IdVentas=?
+`;
+  db.query(sql, [id], (err, results) => {
+    if (err) {
+      return res.status(400).send(err);
+    }
+    res.status(200).send(results);
+  });
+});
+
+app.get("/getMaterialesVentas/:id", (req, res) => {
+  const { id } = req.params;
+
+  const sql = `
+        SELECT 
+            dv.idventa,
+            dv.idproducto,
+            dv.cantidad AS cantidad_vendida,
+            mp.IdMateriaPrima,
+            mp.CantMp AS cantidad_por_producto,
+            (dv.cantidad * mp.CantMp) AS cantidad_total_mp
+        FROM detallesdeventa dv
+        JOIN mpporproducto mp ON dv.idproducto = mp.IdProducto
+        WHERE dv.idventa = ?;
+    `;
+
+  db.query(sql, [id], (err, results) => {
+    if (err) {
+      console.error("Error en la consulta:", err);
+      return res.status(500).send("Error al obtener los materiales.");
+    }
+
+    // Agrupar y sumar la cantidad total de cada materia prima
+    let materialesAgrupados = {};
+
+    results.forEach((row) => {
+      if (!materialesAgrupados[row.IdMateriaPrima]) {
+        materialesAgrupados[row.IdMateriaPrima] = {
+          IdMateriaPrima: row.IdMateriaPrima,
+          cantidad_total_mp: 0,
+        };
+      }
+      materialesAgrupados[row.IdMateriaPrima].cantidad_total_mp +=
+        row.cantidad_total_mp;
+    });
+
+    // Convertir objeto en array
+    const materialesFinales = Object.values(materialesAgrupados);
+
+    res.json(materialesFinales);
+  });
+});
+
+app.put("/actualizarStock", async (req, res) => {
+  const actualizarStock = async () => {
+    const sql = `UPDATE stock SET CantPorMP = CantPorMP - ? WHERE IdMateriaPrima = ?`;
+
+    try {
+      for (const mp of req.body) {
+        await new Promise((resolve, reject) => {
+          db.query(
+            sql,
+            [mp.cantidad_total_mp, mp.IdMateriaPrima],
+            (err, result) => {
+              if (err) reject(err);
+              else resolve(result);
+            }
+          );
+        });
+      }
+
+      console.log("Stock actualizado correctamente");
+    } catch (error) {
+      console.error("Error actualizando stock:", error);
+    }
+  };
+
+  const results = await actualizarStock();
+
+  res.status(200).send(results);
 });
 
 app.get("/traerStock/", (req, res) => {
@@ -180,7 +303,7 @@ app.post("/cargarCliente", (req, res) => {
   const sql = "INSERT INTO clientes SET ?";
   db.query(sql, nuevoCliente, (err) => {
     if (err) {
-      return res.status(500).send(err);
+      return res.status(400).send(err);
     }
     res.send("Dato insertado");
   });
@@ -274,6 +397,14 @@ app.delete("/eliminarProveedor/:id", (req, res) => {
 });
 
 //-----------------------Producto-------------------------------------//
+
+app.get("/buscarImagenes", (req, res) => {
+  const sql = "SElECT * FROM imagenessillones ";
+  db.query(sql, (err, results) => {
+    if (err) throw err;
+    res.status(200).send(results);
+  });
+});
 app.get("/buscarPatas", (req, res) => {
   const sql = `SELECT * FROM materiaprima WHERE Nombre LIKE "%patas%" `;
   db.query(sql, (err, results) => {
@@ -516,7 +647,7 @@ app.get("/graficoAumentoXMP/:idMaterial/:idAnio", (req, res) => {
 app.get("/graficoTortaMP/:idMes", (req, res) => {
   const { idMes } = req.params;
   const sql =
-    "SELECT dc.IdMP AS material,EXTRACT(YEAR FROM c.Fecha) AS año, EXTRACT(MONTH FROM c.Fecha) AS mes, AVG(dc.PrecioMP) AS precio_promedio_mensual FROM  compras c JOIN detallescompras dc ON c.IdCompra = dc.IdCompra WHERE EXTRACT(MONTH FROM c.Fecha) = ?  AND EXTRACT(YEAR FROM c.Fecha) IN (YEAR(CURDATE()), YEAR(CURDATE()) - 1) GROUP BY material, año,mes ORDER BY material, año;";
+    "SELECT dc.IdMP AS material,EXTRACT(YEAR FROM c.Fecha) AS año, EXTRACT(MONTH FROM c.Fecha) AS mes, AVG(dc.PrecioMP) AS precio_promedio_mensual FROM  compras c JOIN detallescompras dc ON c.IdCompra = dc.IdCompra WHERE EXTRACT(MONTH FROM c.Fecha) = ?  AND EXTRACT(YEAR FROM c.Fecha)  IN (YEAR(CURDATE()) - 1, YEAR(CURDATE()) - 2) GROUP BY material, año,mes ORDER BY material, año;";
   db.query(sql, [idMes], (err, results) => {
     if (err) {
       return res.status(400).send(err);
@@ -559,12 +690,26 @@ app.get("/graficoTortaVentas/:idMes/:idAnio", (req, res) => {
   const idMes = req.params.idMes;
   const idAnio = req.params.idAnio;
   const sql =
-    "SELECT p.Nombre AS nombre_producto, SUM(d.cantidad) AS cantidad_vendida,  (SELECT SUM(dv.cantidad) FROM detallesdeventa dv JOIN ventas ve ON dv.idventa = ve.IdVentas  WHERE EXTRACT(YEAR FROM ve.fechaVenta) = ? AND EXTRACT(MONTH FROM ve.fechaVenta) = ?) AS cantidad_total_mes FROM   detallesdeventa d JOIN   ventas v ON d.idventa = v.IdVentas JOIN   producto p ON d.idproducto = p.IdProducto WHERE    EXTRACT(YEAR FROM v.fechaVenta) = ? AND EXTRACT(MONTH FROM v.fechaVenta) = ? GROUP BY   p.Nombre ORDER BY  nombre_producto;";
+    "SELECT p.Nombre AS nombre_producto, SUM(d.cantidad) AS cantidad_vendida,  (SELECT SUM(dv.cantidad) FROM detallesdeventa dv JOIN ventas ve ON dv.idventa = ve.IdVentas  WHERE EXTRACT(YEAR FROM ve.fechaVenta) = ? AND EXTRACT(MONTH FROM ve.fechaVenta) = ?AND ve.estado = 'completado') AS cantidad_total_mes FROM detallesdeventa d JOIN ventas v ON d.idventa = v.IdVentas JOIN producto p ON d.idproducto = p.IdProducto WHERE EXTRACT(YEAR FROM v.fechaVenta) = ? AND EXTRACT(MONTH FROM v.fechaVenta) = ? AND v.estado = 'completado' GROUP BY p.Nombre ORDER BY nombre_producto;";
+
   db.query(sql, [idAnio, idMes, idAnio, idMes], (err, results) => {
     if (err) {
       return res.status(400).send(err);
     }
     res.status(200).send(results);
+  });
+});
+
+app.get("/graficoLinealVentas/:anio", (req, res) => {
+  const { anio } = req.params;
+  const sql =
+    "SELECT EXTRACT(YEAR FROM v.fechaVenta) AS año,EXTRACT(MONTH FROM v.fechaVenta) AS mes,SUM(p.Precio * d.cantidad) AS precio_promedio_mensual FROM ventas v JOIN detallesdeventa d ON v.IdVentas = d.idventa JOIN producto p ON d.idproducto = p.IdProducto WHERE v.estado = 'completado' AND EXTRACT(YEAR FROM v.fechaVenta) = ? GROUP BY EXTRACT(YEAR FROM v.fechaVenta), EXTRACT(MONTH FROM v.fechaVenta) ORDER BY  año, mes;";
+
+  db.query(sql, [anio], (err, result) => {
+    if (err) {
+      return res.status(400).send(err);
+    }
+    res.status(200).send(result);
   });
 });
 
