@@ -277,7 +277,7 @@ app.put("/actualizarStock", async (req, res) => {
 });
 
 app.get("/traerStock/", (req, res) => {
-  const sql = `SELECT S.IdStock, M.Nombre, S.CantPorMP , S.StockMinimo FROM materiaprima AS M, stock AS S WHERE S.IdMateriaPrima=M.IdMateriaPrima`;
+  const sql = `SELECT S.IdStock, M.Nombre, S.CantPorMP , S.StockMinimo, S.IdMateriaPrima FROM materiaprima AS M, stock AS S WHERE S.IdMateriaPrima=M.IdMateriaPrima`;
   db.query(sql, (err, results) => {
     if (err) {
       return res.status(400).send(err);
@@ -515,6 +515,59 @@ app.get("/buscarMateriaPrima", (req, resp) => {
   db.query(sql, (err, results) => {
     if (err) throw err;
     resp.status(200).send(results);
+  });
+});
+
+app.post("/cargarMP", (req, res) => {
+  const MP = req.body;
+  const precio = 0;
+  const sql =
+    "INSERT INTO materiaprima (PrecioUnitario,Nombre,Descripcion) VALUES(?,?,?)";
+  db.query(sql, [precio, MP.nombre, MP.unidad], (err, result) => {
+    if (err) {
+      console.error("Error al insertar en materiaprima:", err);
+      return res.status(500).send({ error: "Error al guardar materia prima" });
+    }
+
+    const id = result.insertId;
+
+    const sql =
+      "INSERT INTO stock (IdMateriaPrima,CantPorMP,FechaIngreso,stockMinimo) VALUES(?,?,?,?)";
+    db.query(sql, [id, MP.cantidad, MP.fecha, MP.minimo], (err2, result2) => {
+      if (err2) {
+        console.error("Error al insertar en stock:", err2);
+        return res.status(500).send({ error: "Error al guardar stock" });
+      }
+
+      res.status(200).send({
+        message: "Materia prima y stock guardados correctamente",
+        idMateriaPrima: id,
+      });
+    });
+  });
+});
+
+app.put("/cargarMP/:id", (req, res) => {
+  const { id } = req.params;
+  const { nombre, unidad, cantidad, minimo } = req.body;
+  const sql = `UPDATE materiaprima M JOIN stock S ON M.IdMateriaPrima = S.IdMateriaPrima SET M.Nombre=?, M.Descripcion=?,S.CantPorMP=? , S.StockMinimo=? WHERE M.IdMateriaPrima=?`;
+  db.query(sql, [nombre, unidad, cantidad, minimo, id], (err, result) => {
+    if (err) {
+      return res.status(500).send(err);
+    }
+    res.status(200).send(result);
+  });
+});
+
+app.get("/traerMP/:id", (req, res) => {
+  const { id } = req.params;
+  const sql =
+    "SELECT M.Nombre, M.Descripcion,S.CantPorMP,S.StockMinimo FROM materiaprima M JOIN stock S ON M.IdMateriaPrima = S.IdMateriaPrima  WHERE M.IdMateriaPrima = ?";
+  db.query(sql, [id], (err, result) => {
+    if (err) {
+      return res.status(500).send(err);
+    }
+    res.status(200).send(result[0]);
   });
 });
 
